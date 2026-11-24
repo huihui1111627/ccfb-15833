@@ -1,0 +1,309 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>滑雪场调用链尾部采样控制台</title>
+  <style>
+    :root {
+      --bg: #0b1220;
+      --panel: #121c2f;
+      --panel-2: #17233a;
+      --line: #263653;
+      --text: #e8f0ff;
+      --muted: #8ea3c8;
+      --blue: #5aa7ff;
+      --green: #35d399;
+      --yellow: #f6c945;
+      --red: #ff6b6b;
+      --purple: #b58cff;
+      --shadow: 0 10px 30px rgba(0,0,0,.25);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: radial-gradient(circle at top left, #172642 0, var(--bg) 42%);
+      color: var(--text);
+      font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+        "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+    }
+    header {
+      padding: 22px 28px 14px;
+      display: flex;
+      align-items: end;
+      justify-content: space-between;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+    h1 { margin: 0; font-size: 24px; letter-spacing: .5px; }
+    .sub { color: var(--muted); margin-top: 6px; }
+    .live {
+      display: inline-flex; align-items: center; gap: 8px;
+      padding: 7px 12px; border: 1px solid var(--line); border-radius: 999px;
+      background: rgba(53,211,153,.08); color: var(--green); font-weight: 600;
+    }
+    .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); box-shadow: 0 0 0 5px rgba(53,211,153,.12); }
+    main { padding: 8px 28px 36px; }
+    .grid { display: grid; gap: 16px; }
+    .top-cards { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+    .section {
+      background: linear-gradient(180deg, rgba(255,255,255,.025), transparent), var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      box-shadow: var(--shadow);
+      padding: 16px;
+      min-width: 0;
+    }
+    .section h2 { margin: 0 0 14px; font-size: 16px; display: flex; align-items: center; gap: 8px; }
+    .section h2 .hint { font-size: 12px; color: var(--muted); font-weight: 400; }
+    .metric .label { color: var(--muted); font-size: 12px; }
+    .metric .value { font-size: 26px; font-weight: 750; margin-top: 4px; font-variant-numeric: tabular-nums; }
+    .metric .minor { color: var(--muted); font-size: 12px; margin-top: 5px; }
+    .bar { height: 8px; background: #0a1120; border-radius: 999px; overflow: hidden; border: 1px solid var(--line); margin-top: 10px; }
+    .bar > i { display: block; height: 100%; width: 0; border-radius: inherit; background: linear-gradient(90deg, var(--blue), var(--purple)); transition: width .4s ease; }
+    .bar.warn > i { background: linear-gradient(90deg, var(--yellow), #ff9f43); }
+    .bar.danger > i { background: linear-gradient(90deg, var(--red), #ff3d71); }
+    .policy-grid { display: grid; grid-template-columns: repeat(5, minmax(0,1fr)); gap: 12px; }
+    .policy {
+      background: var(--panel-2); border: 1px solid var(--line); border-radius: 14px; padding: 14px;
+    }
+    .policy .name { font-weight: 700; }
+    .policy .prio { color: var(--muted); font-size: 12px; }
+    .policy .hits { font-size: 24px; font-weight: 800; margin-top: 8px; font-variant-numeric: tabular-nums; }
+    .policy.error { border-top: 3px solid var(--red); }
+    .policy.duration { border-top: 3px solid var(--yellow); }
+    .policy.service_operation { border-top: 3px solid var(--purple); }
+    .policy.tag { border-top: 3px solid var(--blue); }
+    .policy.probability { border-top: 3px solid var(--green); }
+    table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+    th, td { padding: 9px 10px; border-bottom: 1px solid var(--line); text-align: right; white-space: nowrap; }
+    th:first-child, td:first-child { text-align: left; }
+    th { color: var(--muted); font-size: 12px; font-weight: 600; position: sticky; top: 0; background: var(--panel); z-index: 1; }
+    tbody tr:hover { background: rgba(90,167,255,.07); }
+    .table-wrap { max-height: 430px; overflow: auto; border: 1px solid var(--line); border-radius: 12px; }
+    .svc { font-weight: 650; }
+    .deviation.good { color: var(--green); }
+    .deviation.warn { color: var(--yellow); }
+    .deviation.bad { color: var(--red); font-weight: 750; }
+    .mini-bar { width: 92px; height: 7px; background: #0a1120; border-radius: 99px; overflow: hidden; display: inline-block; vertical-align: middle; margin-right: 8px; border: 1px solid var(--line); }
+    .mini-bar > i { display: block; height: 100%; background: var(--green); }
+    .late-summary { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; margin-bottom: 14px; }
+    .pill-stat { background: var(--panel-2); border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; }
+    .pill-stat b { display: block; font-size: 19px; margin-top: 3px; }
+    .mode { padding: 2px 8px; border-radius: 999px; font-size: 12px; font-weight: 700; }
+    .mode.cached_keep, .mode.independent_keep { background: rgba(53,211,153,.14); color: var(--green); }
+    .mode.cached_drop, .mode.independent_drop { background: rgba(142,163,200,.14); color: var(--muted); }
+    .empty { color: var(--muted); padding: 18px; text-align: center; }
+    .two-col { grid-template-columns: 1.25fr .75fr; align-items: start; }
+    code { color: #b9d4ff; }
+    @media (max-width: 1100px) {
+      .top-cards { grid-template-columns: repeat(2, 1fr); }
+      .policy-grid { grid-template-columns: repeat(2, 1fr); }
+      .two-col { grid-template-columns: 1fr; }
+      .late-summary { grid-template-columns: repeat(2,1fr); }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <h1>滑雪场调用链 · 尾部采样决策台</h1>
+      <div class="sub">按 TraceID 聚合 → 静默收齐 → 优先级策略 → 每服务目标速率反馈；页面每秒刷新。</div>
+    </div>
+    <div class="live"><span class="dot"></span><span id="status">连接中…</span></div>
+  </header>
+
+  <main class="grid" style="gap:16px">
+    <section class="grid top-cards">
+      <div class="section metric">
+        <div class="label">正在缓冲链路数</div>
+        <div class="value" id="bufferedTraces">-</div>
+        <div class="minor">峰值 <span id="peakTraces">-</span> 条</div>
+      </div>
+      <div class="section metric">
+        <div class="label">缓冲内存占用（估算）</div>
+        <div class="value" id="bufferBytes">-</div>
+        <div class="minor">上限 <span id="bufferCap">-</span>；Go Heap <span id="heapAlloc">-</span></div>
+        <div class="bar" id="memBar"><i></i></div>
+      </div>
+      <div class="section metric">
+        <div class="label">已决策 / 保留率</div>
+        <div class="value"><span id="decisions">-</span></div>
+        <div class="minor">保留 <span id="kept">-</span> · 丢弃 <span id="dropped">-</span> · 保留率 <span id="keepRate">-</span></div>
+      </div>
+      <div class="section metric">
+        <div class="label">分批送出 / 静默顺延</div>
+        <div class="value"><span id="batches">-</span> 批</div>
+        <div class="minor"><span id="batchSpans">-</span> 片段已分批；顺延 <span id="extensions">-</span> 次</div>
+      </div>
+    </section>
+
+    <section class="section">
+      <h2>各策略命中链路数 <span class="hint">多个策略可同时命中；优先级数字越小越先展示为主原因，任意强制策略命中即保留</span></h2>
+      <div class="policy-grid" id="policyGrid"></div>
+    </section>
+
+    <section class="section">
+      <h2>每个服务的保留速率与目标 <span class="hint">近窗速率用于自动调概率；累计速率用于核对长期目标</span></h2>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>服务</th>
+              <th>目标/s</th>
+              <th>近窗保留/s</th>
+              <th>累计保留/s</th>
+              <th>累计偏差</th>
+              <th>自适应概率</th>
+              <th>近窗到达/s</th>
+              <th>强制/s</th>
+              <th>保留/到达</th>
+            </tr>
+          </thead>
+          <tbody id="serviceRows"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="grid two-col">
+      <div class="section">
+        <h2>迟到片段处理记录 <span class="hint">决策仍在 LRU 中时沿用结论；容量淘汰后按单个片段独立判定</span></h2>
+        <div class="late-summary">
+          <div class="pill-stat"><span class="label">迟到总数</span><b id="lateTotal">-</b></div>
+          <div class="pill-stat"><span class="label">缓存保留</span><b id="lateCachedKeep" style="color:var(--green)">-</b></div>
+          <div class="pill-stat"><span class="label">缓存丢弃</span><b id="lateCachedDrop">-</b></div>
+          <div class="pill-stat"><span class="label">淘汰后保留</span><b id="lateIndKeep" style="color:var(--green)">-</b></div>
+          <div class="pill-stat"><span class="label">淘汰后丢弃</span><b id="lateIndDrop">-</b></div>
+        </div>
+        <div class="table-wrap" style="max-height:360px">
+          <table>
+            <thead><tr><th>时间</th><th>Trace</th><th>服务</th><th>处理</th><th>原因/策略</th></tr></thead>
+            <tbody id="lateRows"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="section">
+        <h2>采样链路说明</h2>
+        <div class="sub" style="line-height:1.9">
+          <p>1. TraceID 为随机 uint64；概率策略取 <code>TraceID &amp; ((1&lt;&lt;20)-1)</code> 与阈值比较，同一编号在相同概率下结论稳定。</p>
+          <p>2. 错误、总耗时 ≥ 1s、重点服务/接口、VIP 标签为强制保留；自适应概率补足每服务目标。</p>
+          <p>3. 普通服务静默 2s，异步消息服务 6s；到期后的边界片段最多顺延一次。</p>
+          <p>4. 超过 64 个片段的大链路提前分批；决策到达后由接收端提交或丢弃临时批次。</p>
+          <p>5. 缓冲超内存上限时，从最老链路提前决策。验证程序另有专项压测。</p>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const fmtInt = new Intl.NumberFormat('zh-CN');
+    function bytes(n) {
+      if (!n && n !== 0) return '-';
+      const units = ['B','KiB','MiB','GiB'];
+      let v = n, i = 0;
+      while (Math.abs(v) >= 1024 && i < units.length - 1) { v /= 1024; i++; }
+      return `${v.toFixed(i === 0 ? 0 : 2)} ${units[i]}`;
+    }
+    function rps(n) { return (Number(n) || 0).toFixed(2); }
+    function pct(n) { return `${(Number(n) || 0).toFixed(1)}%`; }
+    function time(ts) {
+      if (!ts || ts.startsWith('0001')) return '-';
+      const d = new Date(ts);
+      return d.toLocaleTimeString('zh-CN', {hour12:false}) + '.' + String(d.getMilliseconds()).padStart(3,'0');
+    }
+    function esc(s) {
+      return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    }
+    function devClass(v) { return Math.abs(v) <= 15 ? 'good' : Math.abs(v) <= 35 ? 'warn' : 'bad'; }
+
+    function renderPolicies(policies) {
+      const descriptions = {
+        error: '任意片段出错', duration: '总耗时 ≥ 1s', service_operation: 'payment / Refund',
+        tag: 'ticket.class=vip', probability: '低位 TraceID 阈值'
+      };
+      $('policyGrid').innerHTML = policies.map(p => `
+        <div class="policy ${esc(p.id)}">
+          <div class="name">${esc(p.name)}</div>
+          <div class="prio">优先级 ${p.priority} · ${esc(descriptions[p.id] || '')}</div>
+          <div class="hits">${fmtInt.format(p.hits)}</div>
+        </div>`).join('');
+    }
+
+    function renderServices(services) {
+      $('serviceRows').innerHTML = services.map(s => {
+        const ratio = s.arrivals > 0 ? Math.min(1, s.kept / s.arrivals) : 0;
+        const width = Math.max(0, Math.min(100, (s.probability || 0) * 100));
+        return `<tr>
+          <td class="svc">${esc(s.name)}</td>
+          <td>${rps(s.target_rps)}</td>
+          <td>${rps(s.window_rps)}</td>
+          <td>${rps(s.actual_rps)}</td>
+          <td class="deviation ${devClass(s.deviation_pct)}">${s.deviation_pct >= 0 ? '+' : ''}${(s.deviation_pct||0).toFixed(1)}%</td>
+          <td><span class="mini-bar"><i style="width:${width}%"></i></span>${(s.probability*100).toFixed(1)}%</td>
+          <td>${rps(s.arrival_rps)}</td>
+          <td>${rps(s.mandatory_rps)}</td>
+          <td><span class="mini-bar"><i style="width:${ratio*100}%;background:var(--purple)"></i></span>${(ratio*100).toFixed(1)}%</td>
+        </tr>`;
+      }).join('');
+    }
+
+    function renderLate(late) {
+      $('lateTotal').textContent = fmtInt.format(late.total);
+      $('lateCachedKeep').textContent = fmtInt.format(late.cached_keep);
+      $('lateCachedDrop').textContent = fmtInt.format(late.cached_drop);
+      $('lateIndKeep').textContent = fmtInt.format(late.independent_keep);
+      $('lateIndDrop').textContent = fmtInt.format(late.independent_drop);
+      const rows = late.recent || [];
+      $('lateRows').innerHTML = rows.length ? rows.map(r => `
+        <tr>
+          <td>${time(r.at)}</td>
+          <td><code>${esc(r.trace_id)}</code></td>
+          <td>${esc(r.service)}</td>
+          <td><span class="mode ${esc(r.mode)}">${esc(r.mode)}</span></td>
+          <td style="white-space:normal;text-align:left;min-width:260px">${esc(r.reason)}${r.policy_id ? ` <code>[${esc(r.policy_id)}]</code>` : ''}</td>
+        </tr>`).join('') : '<tr><td colspan="5" class="empty">等待迟到片段…</td></tr>';
+    }
+
+    function render(d) {
+      $('status').textContent = '实时数据 · ' + time(d.generated_at);
+      const b = d.buffered;
+      $('bufferedTraces').textContent = fmtInt.format(b.traces);
+      $('peakTraces').textContent = fmtInt.format(b.peak_traces);
+      $('bufferBytes').textContent = bytes(b.estimated_bytes);
+      $('bufferCap').textContent = bytes(b.capacity_bytes);
+      $('heapAlloc').textContent = bytes(b.go_heap_alloc);
+      const mp = Math.max(0, Math.min(100, b.memory_limit_pct || 0));
+      const bar = $('memBar');
+      bar.querySelector('i').style.width = mp + '%';
+      bar.className = 'bar' + (mp > 85 ? ' danger' : mp > 65 ? ' warn' : '');
+
+      const dec = d.decisions;
+      $('decisions').textContent = fmtInt.format(dec.total);
+      $('kept').textContent = fmtInt.format(dec.keep);
+      $('dropped').textContent = fmtInt.format(dec.drop);
+      $('keepRate').textContent = pct(dec.keep_rate * 100);
+      $('batches').textContent = fmtInt.format(d.batches.batches);
+      $('batchSpans').textContent = fmtInt.format(d.batches.spans);
+      $('extensions').textContent = fmtInt.format(d.extensions);
+
+      renderPolicies(d.policies || []);
+      renderServices(d.services || []);
+      renderLate(d.late || {});
+    }
+
+    async function tick() {
+      try {
+        const res = await fetch('/api/state', {cache: 'no-store'});
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        render(await res.json());
+      } catch (e) {
+        $('status').textContent = '刷新失败：' + e.message;
+      }
+    }
+    tick();
+    setInterval(tick, 1000);
+  </script>
+</body>
+</html>
